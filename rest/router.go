@@ -10,7 +10,7 @@ import (
 
 type router struct {
 	Routes []*Route
-
+	Authorizator 			func(route *Route, request *Request) bool
 	disableTrieCompression bool
 	index                  map[*Route]int
 	trie                   *trie.Trie
@@ -18,7 +18,7 @@ type router struct {
 
 // MakeRouter returns the router app. Given a set of Routes, it dispatches the request to the
 // HandlerFunc of the first route that matches. The order of the Routes matters.
-func MakeRouter(routes ...*Route) (App, error) {
+func MakeRouter(fun func(route *Route, request *Request) bool,routes ...*Route) (App, error) {
 	r := &router{
 		Routes: routes,
 	}
@@ -26,6 +26,7 @@ func MakeRouter(routes ...*Route) (App, error) {
 	if err != nil {
 		return nil, err
 	}
+	r.Authorizator = fun
 	return r, nil
 }
 
@@ -35,6 +36,7 @@ func (rt *router) AppFunc() HandlerFunc {
 
 		// find the route
 		route, params, pathMatched := rt.findRouteFromURL(request.Method, request.URL)
+		//route, _, pathMatched := rt.findRouteFromURL(request.Method, request.URL)
 		if route == nil {
 
 			if pathMatched {
@@ -50,7 +52,13 @@ func (rt *router) AppFunc() HandlerFunc {
 
 		// a route was found, set the PathParams
 		request.PathParams = params
-
+		if rt.Authorizator!=nil {
+			if !rt.Authorizator(route,request){
+				writer.Header().Set("WWW-Authenticate", "JWT realm="+"Realm is required")
+				Error(writer, "Not Authorized", http.StatusUnauthorized)
+				return
+			}
+		}
 		// run the user code
 		handler := route.Func
 		handler(writer, request)
